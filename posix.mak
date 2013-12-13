@@ -15,18 +15,18 @@ DMD_DIR=../dmd
 PHOBOS_DIR=../phobos
 DRUNTIME_DIR=../druntime
 DOC_OUTPUT_DIR=$(ROOT_DIR)/web
-GIT_HOME=https://github.com/D-Programming-Language
+GITHUB_HOME:=https://github.com/D-Programming-Language
 DPL_DOCS=../tools/dpl-docs/dpl-docs
 DPL_DOCS_FLAGS=--std-macros=std-ddox.ddoc --override-macros=std-ddox-override.ddoc --
 
 # Latest released version
 ifeq (,${LATEST})
-LATEST:=$(shell cd ${DMD_DIR} && \
-  git fetch --tags https://github.com/D-Programming-Language/dmd && \
-  git tag | grep '^v[0-9][0-9.]*$$' | sed 's/^v//' | sort -nr | head -n 1)
+	LATEST:=$(shell \
+		curl -sSL https://api.github.com/repos/D-Programming-Language/dmd/tags | \
+		sed -n 's|[ ]*"name": "v\([0-9][0-9.]*\)",|\1|p' | sort -nr | head -n 1)
 endif
 ifeq (,${LATEST})
-  $(error Could not fetch latest version)
+	$(error Could not fetch latest version)
 endif
 $(info Current release: ${LATEST})
 ROOT_DIR=$(shell pwd)
@@ -167,7 +167,7 @@ clean:
 	rm -rf $(DOC_OUTPUT_DIR) ${LATEST}.ddoc
 	rm -rf auto dlangspec-tex.d $(addprefix dlangspec,.aux .d .dvi .fdb_latexmk .fls .log .out .pdf .tex)
 	rm -f docs.json docs-prerelease.json
-	@echo You should issue manually: rm -rf ${DMD_DIR}.${LATEST} ${DRUNTIME_DIR}.${LATEST} ${PHOBOS_DIR}.${LATEST}
+	@echo You should issue manually: rm -rf ${DMD_DIR}-${LATEST} ${DRUNTIME_DIR}-${LATEST} ${PHOBOS_DIR}-${LATEST}
 
 rsync : all
 	rsync -avz $(DOC_OUTPUT_DIR)/ d-programming@digitalmars.com:data/
@@ -241,17 +241,18 @@ $(DOC_OUTPUT_DIR)/dlangspec.pdf : dlangspec.dvi
 # dmd compiler, latest released build and current build
 ################################################################################
 
-${DMD_DIR}.${LATEST}/src/dmd :
-	[ -d ${DMD_DIR}.${LATEST} ] || \
-	  git clone ${GIT_HOME}/dmd ${DMD_DIR}.${LATEST}/
-	cd ${DMD_DIR}.${LATEST} && git checkout v${LATEST}
-	${MAKE} --directory=${DMD_DIR}.${LATEST}/src -f posix.mak clean
-	${MAKE} --directory=${DMD_DIR}.${LATEST}/src -f posix.mak -j 4
+${DMD_DIR}-${LATEST}/src/dmd : ${DMD_DIR}-${LATEST}
+	${MAKE} --directory=${DMD_DIR}-${LATEST}/src -f posix.mak clean
+	${MAKE} --directory=${DMD_DIR}-${LATEST}/src -f posix.mak -j 4
 
 ${DMD_DIR}/src/dmd :
-	[ -d ${DMD_DIR} ] || git clone ${GIT_HOME}/dmd ${DMD_DIR}/
 	${MAKE} --directory=${DMD_DIR}/src -f posix.mak clean
 	${MAKE} --directory=${DMD_DIR}/src -f posix.mak -j 4
+
+${DMD_DIR}-${LATEST}:
+	[ -d $@ ] && touch $@ || \
+		curl -sSL ${GITHUB_HOME}/dmd/archive/v${LATEST}.tar.gz | \
+		tar -C $(@D) -zxf -
 
 ################################################################################
 # druntime, latest released build and current build
@@ -264,17 +265,19 @@ ${DOC_OUTPUT_DIR}/phobos-prerelease/object.html : ${DMD_DIR}/src/dmd
 		DOCDIR=${DOC_OUTPUT_DIR}/phobos-prerelease \
 		DOCFMT=`pwd`/std.ddoc
 
-druntime-release : ${DOC_OUTPUT_DIR}/phobos/object.html
-${DOC_OUTPUT_DIR}/phobos/object.html : ${DMD_DIR}.${LATEST}/src/dmd
+druntime-release : ${DRUNTIME_DIR}-${LATEST} ${DOC_OUTPUT_DIR}/phobos/object.html
+${DOC_OUTPUT_DIR}/phobos/object.html : ${DMD_DIR}-${LATEST}/src/dmd
 	rm -f $@
-	[ -d ${DRUNTIME_DIR}.${LATEST} ] || \
-	  git clone ${GIT_HOME}/druntime ${DRUNTIME_DIR}.${LATEST}/
-	cd ${DRUNTIME_DIR}.${LATEST} && git checkout v${LATEST}
-	${MAKE} --directory=${DRUNTIME_DIR}.${LATEST} -f posix.mak clean
-	${MAKE} --directory=${DRUNTIME_DIR}.${LATEST} -f posix.mak \
-	  DMD=${DMD_DIR}.${LATEST}/src/dmd \
+	${MAKE} --directory=${DRUNTIME_DIR}-${LATEST} -f posix.mak clean
+	${MAKE} --directory=${DRUNTIME_DIR}-${LATEST} -f posix.mak \
+	  DMD=${DMD_DIR}-${LATEST}/src/dmd \
 	  DOCDIR=${DOC_OUTPUT_DIR}/phobos \
 	  DOCFMT=`pwd`/std.ddoc -j 4
+
+${DRUNTIME_DIR}-${LATEST}:
+	[ -d $@ ] && touch $@ || \
+		curl -sSL ${GITHUB_HOME}/druntime/archive/v${LATEST}.tar.gz | \
+		tar -C $(@D) -zxf -
 
 ################################################################################
 # phobos, latest released build and current build
@@ -286,19 +289,21 @@ ${DOC_OUTPUT_DIR}/phobos-prerelease/index.html : std.ddoc \
 	${MAKE} --directory=${PHOBOS_DIR} -f posix.mak \
 	DOC_OUTPUT_DIR=${DOC_OUTPUT_DIR}/phobos-prerelease html -j 4
 
-phobos-release: ${DOC_OUTPUT_DIR}/phobos/index.html
+phobos-release: ${PHOBOS_DIR}-${LATEST} ${DOC_OUTPUT_DIR}/phobos/index.html
 ${DOC_OUTPUT_DIR}/phobos/index.html : std.ddoc ${LATEST}.ddoc \
 	    ${DOC_OUTPUT_DIR}/phobos/object.html
-	[ -d ${PHOBOS_DIR}.${LATEST} ] || \
-	  git clone ${GIT_HOME}/phobos ${PHOBOS_DIR}.${LATEST}/
-	cd ${PHOBOS_DIR}.${LATEST} && git checkout v${LATEST}
-	${MAKE} --directory=${PHOBOS_DIR}.${LATEST} -f posix.mak -j 4 \
+	${MAKE} --directory=${PHOBOS_DIR}-${LATEST} -f posix.mak -j 4 \
 	  release html \
-	  DMD=${DMD_DIR}.${LATEST}/src/dmd \
-	  DDOC=${DMD_DIR}.${LATEST}/src/dmd \
-	  DRUNTIME_PATH=${DRUNTIME_DIR}.${LATEST} \
+	  DMD=${DMD_DIR}-${LATEST}/src/dmd \
+	  DDOC=${DMD_DIR}-${LATEST}/src/dmd \
+	  DRUNTIME_PATH=${DRUNTIME_DIR}-${LATEST} \
 	  DOC_OUTPUT_DIR=${DOC_OUTPUT_DIR}/phobos \
 	  STDDOC="`pwd`/$(LATEST).ddoc `pwd`/std.ddoc"
+
+${PHOBOS_DIR}-${LATEST}:
+	[ -d $@ ] && touch $@ || \
+		curl -sSL ${GITHUB_HOME}/phobos/archive/v${LATEST}.tar.gz | \
+		tar -C $(@D) -zxf -
 
 ################################################################################
 # phobos and druntime, latest released build and current build (DDOX version)
@@ -319,17 +324,11 @@ apidocs-serve : docs-prerelease.json
 	  --override-macros=std-ddox-override.ddoc --package-order=std\
 	  --git-target=master --web-file-dir=. docs-prerelease.json
 
-docs.json : ${DMD_DIR}.${LATEST}/src/dmd
+docs.json : ${DMD_DIR}-${LATEST}/src/dmd ${DRUNTIME_DIR}-${LATEST} ${PHOBOS_DIR}-${LATEST}
 	mkdir .tmp || true
-	[ -d ${DRUNTIME_DIR}.${LATEST} ] || \
-	  git clone ${GIT_HOME}/druntime ${DRUNTIME_DIR}.${LATEST}/
-	cd ${DRUNTIME_DIR}.${LATEST} && git checkout v${LATEST}
-	[ -d ${PHOBOS_DIR}.${LATEST} ] || \
-	  git clone ${GIT_HOME}/phobos ${PHOBOS_DIR}.${LATEST}/
-	cd ${PHOBOS_DIR}.${LATEST} && git checkout v${LATEST}
-	find ${DRUNTIME_DIR}.${LATEST}/src -name '*.d' | sed -e /unittest.d/d -e /gcstub/d > .tmp/files.txt
-	find ${PHOBOS_DIR}.${LATEST} -name '*.d' | sed -e /unittest.d/d -e /format/d -e /windows/d >> .tmp/files.txt
-	${DMD_DIR}.${LATEST}/src/dmd -c -o- -version=StdDdoc -Df.tmp/dummy.html -Xfdocs.json @.tmp/files.txt
+	find ${DRUNTIME_DIR}-${LATEST}/src -name '*.d' | sed -e /unittest.d/d -e /gcstub/d > .tmp/files.txt
+	find ${PHOBOS_DIR}-${LATEST} -name '*.d' | sed -e /unittest.d/d -e /format/d -e /windows/d >> .tmp/files.txt
+	${DMD_DIR}-${LATEST}/src/dmd -c -o- -version=StdDdoc -Df.tmp/dummy.html -Xfdocs.json @.tmp/files.txt
 	${DPL_DOCS} filter docs.json --min-protection=Protected --only-documented
 	rm -r .tmp
 
